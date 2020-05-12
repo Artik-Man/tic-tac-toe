@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic-Tac-Toe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="tic-tac-toe">
+    <nav>
+        <section class="player player-me">
+            <h2 class="player__name" id="my-name"></h2>
+            <p class="player__id" id="my-id"></p>
+        </section>
+        <ul id="players"></ul>
+    </nav>
+    <main id="battlefield"></main>
+    <section class="name-modal">
+        <form id="name">
+            <label class="name-modal__label">
+                Enter your name
+                <input type="text" minlength="3" maxlength="20" required pattern="[A-Za-zА-ЯЁа-яё0-9]{3,}">
+                <button>Save</button>
+            </label>
+        </form>
+    </section>
+</div>
+
+<script src="scripts.js"></script>
+</body>
+</html>

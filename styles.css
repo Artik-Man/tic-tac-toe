@@ -64,8 +64,8 @@ body {
     position: relative;
 }
 
-.battlefield.turn:before {
-    content: 'Your turn';
+.battlefield[data-msg]:before {
+    content: attr(data-msg);
     position: absolute;
     bottom: 100%;
     width: 100%;

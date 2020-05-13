@@ -1,4 +1,15 @@
 "use strict";
+class LocalStateStorage {
+    static get() {
+        return JSON.parse(localStorage.getItem('tic-tac-toe') || '{}');
+    }
+    static set(state) {
+        const storage = LocalStateStorage.get();
+        storage.name = state.name || storage.name;
+        storage.xid = state.xid || storage.xid;
+        localStorage.setItem('tic-tac-toe', JSON.stringify(storage));
+    }
+}
 class Subject {
     constructor() {
         this.subscriptions = [];
@@ -18,14 +29,14 @@ class Subject {
     }
 }
 class API {
-    constructor() {
+    constructor(xid) {
+        this.xid = xid;
         this.message = new Subject();
         this.me = '';
-        this.connect(() => {
-        });
+        this.connect();
         setInterval(() => {
             this.ping();
-        }, 10000);
+        }, 20000);
     }
     ping() {
         this.send('SERVER', 'ping');
@@ -39,26 +50,26 @@ class API {
     connect(onReady) {
         if (!this.connection || this.connection.readyState === WebSocket.CLOSED || this.connection.readyState === WebSocket.CLOSING) {
             delete this.connection;
-            this.connection = new WebSocket('wss://ws-post.herokuapp.com/');
+            this.connection = new WebSocket('wss://ws-post.herokuapp.com/', this.xid);
             this.connection.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 this.me = msg.to || this.me;
                 this.message.next(msg);
             };
             this.connection.onopen = () => {
-                onReady();
+                onReady && onReady();
             };
         }
         else {
-            onReady();
+            onReady && onReady();
         }
     }
 }
 class Game {
     constructor(api) {
         this.api = api;
-        this.name = '';
-        this.enemy = null;
+        this.myName = '';
+        this.enemyId = null;
         this.store = new Map();
         this.stateChanged = new Subject();
         this.players = new Set();
@@ -67,6 +78,9 @@ class Game {
             if (typeof message.data !== 'string') {
                 if (message.data && message.data.method === 'DOMINATION') {
                     this.onDomination(message);
+                }
+                else if (message.data && message.data.method === 'NAME') {
+                    this.onGetName(message);
                 }
                 else if (message.data && message.data.method === 'FIRE') {
                     this.onFire(message);
@@ -80,13 +94,16 @@ class Game {
             if (message.connections) {
                 message.connections.forEach(player => {
                     this.players.add(player);
+                    this.sendName(player);
                 });
             }
             if (message.connected) {
                 this.players.add(message.connected);
+                this.sendName(message.connected);
             }
             if (message.disconnected) {
                 this.players.delete(message.disconnected);
+                this.store.delete(message.disconnected);
             }
             this.players.delete(this.api.me);
         }
@@ -116,7 +133,7 @@ class Game {
     onFire(message) {
         if (message.data && typeof message.data !== 'string' && message.data.method === 'FIRE') {
             const state = this.getState(message.from);
-            if (state.turn) {
+            if (state.turn || state.battlefield[message.data.index] === this.api.me) {
                 console.warn('Enemy is cheater!');
             }
             else {
@@ -127,11 +144,18 @@ class Game {
             }
         }
     }
+    onGetName(message) {
+        if (message.data && typeof message.data !== 'string' && message.data.method === 'NAME') {
+            const state = this.getState(message.from);
+            state.name = Game.checkName(message.data.name) || 'CHEATER!';
+            this.stateChanged.next(state);
+        }
+    }
     onDomination(message) {
         if (message.data && typeof message.data !== 'string' && message.data.method === 'DOMINATION') {
             const state = this.getState(message.from);
             state.domination.enemy = message.data.domination;
-            state.name = message.data.name;
+            state.name = Game.checkName(message.data.name) || 'CHEATER!';
             this.checkStart(state);
         }
     }
@@ -178,14 +202,14 @@ class Game {
         }
     }
     fire(index) {
-        if (this.enemy) {
-            const state = this.getState(this.enemy);
+        if (this.enemyId) {
+            const state = this.getState(this.enemyId);
             if (state.turn) {
                 state.turn = false;
                 state.battlefield[index] = this.api.me;
                 this.gameOver(state);
                 this.stateChanged.next(state);
-                this.api.send(this.enemy, {
+                this.api.send(this.enemyId, {
                     method: "FIRE",
                     index
                 });
@@ -204,7 +228,17 @@ class Game {
             this.api.send(id, {
                 method: "DOMINATION",
                 domination: state.domination.me,
-                name: this.name
+                name: this.myName
+            });
+            this.updatePlayerList();
+        }
+    }
+    sendName(id) {
+        const state = this.getState(id);
+        if (!state.started) {
+            this.api.send(id, {
+                method: "NAME",
+                name: this.myName
             });
             this.updatePlayerList();
         }
@@ -213,17 +247,16 @@ class Game {
         state.battlefield.length = 0;
         state.win.length = 0;
         state.domination.me = null;
-        // state.domination.enemy = null;
         state.started = false;
         state.turn = false;
         this.start(state.id.enemy);
     }
     setEnemy(id) {
-        this.enemy = id;
+        this.enemyId = id;
         this.getState(id);
     }
     getEnemy() {
-        return this.enemy;
+        return this.enemyId;
     }
     getMe() {
         return this.api.me;
@@ -249,6 +282,15 @@ class Game {
             this.store.set(id, state);
         }
         return state;
+    }
+    static checkName(name) {
+        const regex = /[A-Za-zА-ЯЁа-яё0-9\s]{3,}/;
+        let [match] = name.match(regex) || [''];
+        match = match.replace(/\s+/, ' ').trim();
+        if (match.length >= 3 && match.length <= 20) {
+            return match;
+        }
+        return '';
     }
 }
 class Renderer {
@@ -317,8 +359,8 @@ class Renderer {
             }
             buttons += `<button class="${mark}" ${disabled}>${char}</button>`;
         }
-        const turn = state.turn ? 'turn' : '';
-        this.battlefieldElement.innerHTML = `<div class="battlefield ${turn}">${buttons}</div>`;
+        const msg = state.turn ? 'data-msg="Your turn"' : '';
+        this.battlefieldElement.innerHTML = `<div class="battlefield" ${msg}>${buttons}</div>`;
     }
     playerList(players) {
         if (!players.length) {
@@ -340,33 +382,27 @@ class Renderer {
     }
 }
 {
-    const startGame = (name) => {
+    const startGame = (localState) => {
         const myName = document.getElementById('my-name');
         const myId = document.getElementById('my-id');
-        const api = new API();
+        const api = new API(localState.xid);
         const game = new Game(api);
         const renderer = new Renderer(game);
-        game.name = name;
+        game.myName = localState.name || '';
         game.playersChanged.subscribe(players => {
             renderer.playerList(players);
-            myId && (myId.innerHTML = api.me);
-            myName && (myName.innerHTML = game.name);
+            myId.innerText = api.me;
+            myName.innerText = game.myName;
+            LocalStateStorage.set({ name: game.myName, xid: api.me });
         });
-    };
-    const checkName = (name) => {
-        const regex = /[A-Za-zА-ЯЁа-яё0-9]{3,}/;
-        const [match] = name.match(regex) || [''];
-        if (match.length < 3 || match.length > 20) {
-            return '';
-        }
-        return match;
     };
     const form = document.getElementById('name');
     const parent = form.parentElement;
-    const storage = JSON.parse(localStorage.getItem('tic-tac-toe') || '{}');
-    if ((storage === null || storage === void 0 ? void 0 : storage.name) && checkName(storage.name)) {
+    const localState = LocalStateStorage.get();
+    localState.name = Game.checkName((localState === null || localState === void 0 ? void 0 : localState.name) || '');
+    if (localState.name) {
         parent.remove();
-        startGame(storage.name);
+        startGame(localState);
     }
     else {
         form.addEventListener('submit', event => {
@@ -374,12 +410,15 @@ class Renderer {
             const input = form.elements[0];
             if (input.validity.valid) {
                 parent.remove();
-                const name = checkName(input.value);
+                const name = Game.checkName(input.value);
                 if (name) {
-                    const storage = { name };
-                    localStorage.setItem('tic-tac-toe', JSON.stringify(storage));
-                    startGame(storage.name);
+                    const localState = { name };
+                    LocalStateStorage.set(localState);
+                    startGame(localState);
                     return;
+                }
+                else {
+                    input.setCustomValidity("Invalid field.");
                 }
             }
             console.warn('I am cheater');

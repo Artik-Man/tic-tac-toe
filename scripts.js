@@ -103,6 +103,12 @@ class Game {
             }
             if (message.disconnected) {
                 this.players.delete(message.disconnected);
+                const state = this.getState(message.disconnected);
+                this.clear(state);
+                state.disconnect = true;
+                if (message.disconnected === this.enemyId) {
+                    this.stateChanged.next(state);
+                }
                 this.store.delete(message.disconnected);
             }
             this.players.delete(this.api.me);
@@ -277,6 +283,7 @@ class Game {
                 battlefield: [],
                 win: [],
                 started: false,
+                disconnect: false,
                 turn: false
             };
             this.store.set(id, state);
@@ -340,27 +347,31 @@ class Renderer {
         }
     }
     battlefield(state) {
-        const chars = Renderer.getChar(state);
-        const winner = new Set(state.win);
-        let buttons = '';
-        for (let i = 0; i < 9; i++) {
-            let disabled = '';
-            let char = '';
-            if (!state.started || !state.turn || state.win.length || state.battlefield[i]) {
-                disabled = 'disabled';
-                if (state.battlefield[i]) {
-                    char = (state.battlefield[i] === state.id.me) ? chars.me : chars.enemy;
+        let html = '';
+        if (!state.disconnect) {
+            const chars = Renderer.getChar(state);
+            const winner = new Set(state.win);
+            let buttons = '';
+            for (let i = 0; i < 9; i++) {
+                let disabled = '';
+                let char = '';
+                if (!state.started || !state.turn || state.win.length || state.battlefield[i]) {
+                    disabled = 'disabled';
+                    if (state.battlefield[i]) {
+                        char = (state.battlefield[i] === state.id.me) ? chars.me : chars.enemy;
+                    }
                 }
+                let mark = '';
+                if (winner.has(i)) {
+                    mark = 'mark';
+                    disabled = 'disabled';
+                }
+                buttons += `<button class="${mark}" ${disabled}>${char}</button>`;
             }
-            let mark = '';
-            if (winner.has(i)) {
-                mark = 'mark';
-                disabled = 'disabled';
-            }
-            buttons += `<button class="${mark}" ${disabled}>${char}</button>`;
+            const msg = state.turn ? 'data-msg="Your turn"' : '';
+            html = `<div class="battlefield" ${msg}>${buttons}</div>`;
         }
-        const msg = state.turn ? 'data-msg="Your turn"' : '';
-        this.battlefieldElement.innerHTML = `<div class="battlefield" ${msg}>${buttons}</div>`;
+        this.battlefieldElement.innerHTML = html;
     }
     playerList(players) {
         if (!players.length) {
